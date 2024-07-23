@@ -1,5 +1,4 @@
 from typing import Iterator, Tuple, Protocol
-from abc import ABC, abstractmethod
 import torch
 from torch import argmax
 from torch import Tensor
@@ -17,25 +16,16 @@ class Data(Protocol):
         ...
 
 
-class Metrics(ABC):
-    @abstractmethod
-    def start(self, phase: str):
+class Metrics(Protocol):
+    def start(self, phase: str) -> None:
         ...
 
-    @abstractmethod
-    def update(self, batch: int, loss: float, accuracy: float):
+    def record(self, batch: int, loss: float, output: Tensor, target: Tensor) -> None:
         ...
 
-    @abstractmethod
-    def stop(self):
+    def stop(self) -> None:
         ...
 
-
-def accuracy(predictions: Tensor, target: Tensor) -> float:
-    return (predictions == target).float().mean().item()
-
-def predictions(output: Tensor):
-    return argmax(output, dim=1)
 
 def train(model: Module, criterion: Criterion, optimizer: Optimizer, data: Data, metrics: Metrics, device: str):
     model.train()
@@ -47,7 +37,7 @@ def train(model: Module, criterion: Criterion, optimizer: Optimizer, data: Data,
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
-        metrics.update(batch, loss.item(), accuracy(predictions(output), target))
+        metrics.record(batch, loss.item(), output, target)
     metrics.stop()
 
 def test(model: Module, criterion: Criterion, data: Data, metrics: Metrics, device: str):
@@ -58,5 +48,5 @@ def test(model: Module, criterion: Criterion, data: Data, metrics: Metrics, devi
             input, target = input.to(device), target.to(device)
             output = model(input)
             loss = criterion(output, target)
-            metrics.update(batch, loss.item(), accuracy(predictions(output), target))
+            metrics.record(batch, loss.item(), output, target)
         metrics.stop()
