@@ -1,8 +1,7 @@
 # Vision Transformers
 Pytorch implementation of vision transformers
 
-
-## Introduction
+![alt text](vit.png)
 
 This repository contains a Pytorch implementation of the Vision Transformer model proposed in the paper [An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale](https://arxiv.org/abs/2010.11929). The Vision Transformer model is a transformer model that can be used for image classification tasks. The model is composed of a feature extractor, a positional encoding layer, and a transformer encoder. The feature extractor is a convolutional layer that extracts the features of the image. The positional encoding is a tensor that adds positional information to the input embeddings. The transformer encoder is a stack of transformer blocks that process the input embeddings.
 
@@ -96,10 +95,13 @@ class LearnablePositionalEncoding(Module):
 ```
 
 
-### Transformer
+### The Transformer
 
 The vision transformer as described in the paper is an encoder-only transformer. Each encoder is composed of a multi-head self-attention layer and a feedforward neural network. 
 
+![alt text](encoder.png)
+
+The paper uses a GELU activation function and LayerNorm normalization. The multi-head self-attention layer is followed by a feedforward neural network. The output of the feedforward neural network is added to the output of the multi-head self-attention layer. The output of the feedforward neural network is then passed through a LayerNorm normalization layer.
 
 ```python
 class Encoder(Module):
@@ -124,6 +126,7 @@ class Encoder(Module):
         return output, weights
 ```
 
+The weights of the multi-head self-attention layer can be returned if the `need_weights` parameter is set to `True`, This is for visualization purposes, and to understand how the model is attending to the input sequence. It's recommended to set this parameter to `False` during training, so PyTorch can use the optimized implementation of scaled dot-product attention.
 
 ```python
 class Transformer(Module):
@@ -143,6 +146,37 @@ class Transformer(Module):
 ```
 
 Then, the Vision Transformer model is composed of the feature extractor, the cls token, the positional encoding, and the transformer encoder, and can be simply expressed as a sequence of the modules described above, with a classification head at the end.
+
+```python
+class ViT(Module):
+    def __init__(
+        self, 
+        patch_shape: Tuple[int, int], 
+        model_dimension: int, 
+        number_of_layers: int, 
+        number_of_heads: int, 
+        hidden_dimension: int, 
+        number_of_channels: int, 
+        number_of_classes: int,
+        max_image_shape: Tuple[int, int] = (28, 28),
+        dropout = 0., 
+    ):
+        super().__init__()
+        self.image_to_embeddings = Sequential(
+            ConvolutionalImagePatchEmbedding(model_dimension, patch_shape, number_of_channels),
+            CLSToken(model_dimension),
+            LearnablePositionalEncoding(model_dimension, number_of_patches(max_image_shape, patch_shape)),
+            Dropout(dropout),
+        )
+
+        self.transformer = Transformer(model_dimension, hidden_dimension, number_of_layers, number_of_heads, dropout)
+        self.head = ClassificationHead(model_dimension, number_of_classes)
+
+    def forward(self, image: Tensor) -> Tensor:
+        output = self.image_to_embeddings(image)
+        output, weights = self.transformer(output)
+        return self.head(output)
+```
 
 ### Some training results
 
