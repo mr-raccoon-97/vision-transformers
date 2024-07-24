@@ -149,3 +149,13 @@ Then, the Vision Transformer model is composed of the feature extractor, the cls
 You can see it in action in the [notebook](notebook.ipynb), for a very simple experiment with the MNIST dataset. Just to see how it works. In the future, I will be training it on a more complex dataset for some specific task.
 
 ![image](plots/ViT-9307c896-231a-4bb4-80c1-6851e87b1cd5.png)
+
+You can see the training logs in tensorboard by running:
+
+```bash
+git clone https://github.com/mr-raccoon-97/vision-transformers.git
+cd vision-transformers
+tensorboard --logdir=logs
+```
+
+Then, open your browser and go to `http://localhost:6006/` to see the training logs.
