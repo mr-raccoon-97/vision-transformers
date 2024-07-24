@@ -11,6 +11,16 @@ from torch.nn import Linear, GELU, Dropout
 from torch.nn import MultiheadAttention
 from torch.nn import Conv2d
 
+    
+class ConvolutionalImagePatchEmbedding(Module):
+    def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
+        super().__init__()
+        self.projector = Conv2d(number_of_channels, model_dimension, kernel_size=patch_shape, stride=patch_shape)
+
+    def forward(self, input: Tensor) -> Tensor:
+        output = self.projector(input)
+        return flatten(output, 2).transpose(1, 2)
+    
 
 class LinearImagePatchEmbedding(Module):
     def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
@@ -27,17 +37,7 @@ class LinearImagePatchEmbedding(Module):
     def forward(self, image: Tensor) -> Tensor:
         output = self.patch_embeddings(image)
         return output
-    
-    
-class ConvolutionalImagePatchEmbedding(Module):
-    def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
-        super().__init__()
-        self.projector = Conv2d(number_of_channels, model_dimension, kernel_size=patch_shape, stride=patch_shape)
 
-    def forward(self, input: Tensor) -> Tensor:
-        output = self.projector(input)
-        return flatten(output, 2).transpose(1, 2)
-    
 
 class Encoder(Module):
     def __init__(self, model_dimension: int, hidden_dimension: int, number_of_heads: int, dropout: float = 0.):
