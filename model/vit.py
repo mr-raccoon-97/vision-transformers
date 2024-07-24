@@ -1,29 +1,83 @@
-from typing import Optional, Tuple
-from dataclasses import dataclass
+from torch import nn
+from typing import Tuple, Optional
 from typing import List
-from torch import flatten, randn, cat
+from einops.layers.torch import Rearrange
+
 from torch import Tensor
+from torch import cat, randn, flatten
 from torch.nn import Parameter
-from torch.nn import Module
-from torch.nn import Conv2d
-from torch.nn import Linear
-from torch.nn import GELU
-from torch.nn import Dropout
-from torch.nn import Sequential
+from torch.nn import Module, Sequential, ModuleList
 from torch.nn import LayerNorm
+from torch.nn import Linear, GELU, Dropout
 from torch.nn import MultiheadAttention
-from torch.nn import ModuleList
+from torch.nn import Conv2d
 
 
-class ImageEmbeddings(Module):
-    def __init__(self, image_width: int, image_height: int, input_channels: int, patch_size: int, model_dimension: int):
+class LinearImagePatchEmbedding(Module):
+    def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
         super().__init__()
-        self.number_of_patches = (image_width *  image_height // patch_size) ** 2        
-        self.projector = Conv2d(input_channels, model_dimension, kernel_size=patch_size, stride=patch_size)
+        patch_height, patch_width = patch_shape
+        patch_dimension = number_of_channels * patch_height * patch_width
+        self.patch_embeddings = Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width),
+            nn.LayerNorm(patch_dimension),
+            nn.Linear(patch_dimension, model_dimension),
+            nn.LayerNorm(model_dimension),
+        )
+
+    def forward(self, image: Tensor) -> Tensor:
+        output = self.patch_embeddings(image)
+        return output
+    
+    
+class ConvolutionalImagePatchEmbedding(Module):
+    def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
+        super().__init__()
+        self.projector = Conv2d(number_of_channels, model_dimension, kernel_size=patch_shape, stride=patch_shape)
 
     def forward(self, input: Tensor) -> Tensor:
         output = self.projector(input)
         return flatten(output, 2).transpose(1, 2)
+    
+
+class Encoder(Module):
+    def __init__(self, model_dimension: int, hidden_dimension: int, number_of_heads: int, dropout: float = 0.):
+        super().__init__()
+        self.normalization = nn.LayerNorm(model_dimension)
+        self.attention = MultiheadAttention(model_dimension, number_of_heads, dropout = dropout, batch_first=True)
+        self.feed_forward = Sequential(
+            nn.LayerNorm(model_dimension),
+            Linear(model_dimension, hidden_dimension),
+            GELU(),
+            Dropout(dropout),
+            Linear(hidden_dimension, model_dimension),
+            Dropout(dropout)
+        )
+        
+    def forward(self, input: Tensor, need_weights: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
+        output = self.normalization(input)
+        output, weights = self.attention(output, output, output, need_weights=need_weights)
+        output = output + input
+        output = self.feed_forward(output) + output
+        return output, weights
+    
+
+
+class Transformer(nn.Module):
+    def __init__(self, model_dimension: int, hidden_dimension: int, number_of_layers: int, number_of_heads: int, dropout = 0.):
+        super().__init__()
+        self.norm = LayerNorm(model_dimension)
+        self.layers = ModuleList([
+            Encoder(model_dimension, hidden_dimension, number_of_heads, dropout) for layer in range(number_of_layers)
+        ])
+
+    def forward(self, sequence: Tensor, need_weights: bool = False) -> Tuple[Tensor, List[Optional[Tensor]]]:
+        attention_weights = []
+        for layer in self.layers:
+            sequence, weights = layer(sequence)
+            attention_weights.append(weights)
+        return self.norm(sequence), attention_weights 
+
 
 
 class CLSToken(Module):
@@ -37,68 +91,60 @@ class CLSToken(Module):
         return cat([token, input], dim=1)
 
 
+
+def number_of_patches(image_shape: Tuple[int, int], patch_shape: Tuple[int, int]) -> int:
+    image_height, image_width = image_shape
+    patch_height, patch_width = patch_shape
+    return (image_height // patch_height) * (image_width // patch_width)
+
+
+
 class LearnablePositionalEncoding(Module):
-    def __init__(self, model_dimension: int, number_of_patches: int):
+    def __init__(self, model_dimension: int, sequence_lenght_limit: int = 196):
         super().__init__()
-        self.position_embeddings = Parameter(randn(1, number_of_patches + 1, model_dimension))
+        self.sequence_lenght_limit = sequence_lenght_limit
+        self.position_embeddings = Parameter(randn(1, sequence_lenght_limit + 1, model_dimension))
 
     def forward(self, input: Tensor) -> Tensor:
-        input = input + self.position_embeddings
+        assert input.size(1) <= self.sequence_lenght_limit + 1, 'input sequence is too long'
+        input = input + self.position_embeddings[:, :input.size(1)]
         return input
-    
 
-class Encoder(Module):
-    def __init__(self, model_dimension: int, hidden_dimension: int, number_of_heads: int, dropout: float):
+
+class ClassificationHead(Module):
+    def __init__(self, model_dimension: int, number_of_classes: int):
         super().__init__()
-        self.attention = MultiheadAttention(model_dimension, number_of_heads, dropout=dropout)
-        self.first_layer_normalization = LayerNorm(model_dimension)
-        self.second_layer_normalization = LayerNorm(model_dimension)
-        self.mlp = Sequential(
-            Linear(model_dimension, hidden_dimension),
-            GELU(),
-            Dropout(dropout),
-            Linear(hidden_dimension, model_dimension),
-            Dropout(dropout)
-        )
+        self.head = Linear(model_dimension, number_of_classes)
 
-    def forward(self, input: Tensor, need_weights: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
-        output = self.first_layer_normalization(input)
-        attention, attention_weights = self.attention(output, output, output, need_weights=need_weights)
-        output = output + attention
-        output = self.second_layer_normalization(output)
-        output = output + self.mlp(output)
-        return output, attention_weights
-    
-@dataclass
-class Settings:
-    image_width: int
-    image_height: int
-    patch_size: int
-    input_channels: int
-    model_dimension: int
-    hidden_dimension: int
-    number_of_heads: int
-    number_of_layers: int
-    dropout: float
+    def forward(self, input: Tensor) -> Tensor:
+        return self.head(input[:, 0])
 
-class ViTClassifier(Module):
-    def __init__(self, settings: Settings, output_classes: int):
+
+class ViT(nn.Module):
+    def __init__(
+        self, 
+        patch_shape: Tuple[int, int], 
+        model_dimension: int, 
+        number_of_layers: int, 
+        number_of_heads: int, 
+        hidden_dimension: int, 
+        number_of_channels: int, 
+        number_of_classes: int,
+        max_image_shape: Tuple[int, int] = (28, 28),
+        dropout = 0., 
+    ):
         super().__init__()
-        self.image_embeddings = ImageEmbeddings(settings.image_width, settings.image_height, settings.input_channels, settings.patch_size, settings.model_dimension)
-        self.cls_token = CLSToken(settings.model_dimension)
-        self.positional_encoding = LearnablePositionalEncoding(settings.model_dimension, self.image_embeddings.number_of_patches)
-        self.encoders = ModuleList([Encoder(settings.model_dimension, settings.hidden_dimension, settings.number_of_heads, settings.dropout) for layer in range(settings.number_of_layers)])
-        self.classification_head = Linear(settings.model_dimension, output_classes)
+        self.patcher = ConvolutionalImagePatchEmbedding(model_dimension, patch_shape, number_of_channels)
+        self.cls_token = CLSToken(model_dimension)
+        self.positional_encoder = LearnablePositionalEncoding(model_dimension, number_of_patches(max_image_shape, patch_shape))
+        self.dropout = Dropout(dropout)
+        self.transformer = Transformer(model_dimension, hidden_dimension, number_of_layers, number_of_heads, dropout)
+        self.head = ClassificationHead(model_dimension, number_of_classes)
 
-    def forward(self, input: Tensor, need_weights: bool = False) -> Tuple[Tensor, Optional[List[Tensor]]]:
-        output = self.image_embeddings(input)
+    def forward(self, image: Tensor) -> Tensor:
+        output = self.patcher(image)
         output = self.cls_token(output)
-        output = self.positional_encoding(output)
-        attention_weights = []
-        for encoder in self.encoders:
-            output, weight = encoder(output, need_weights=need_weights)
-            if need_weights:
-                attention_weights.append(weight)
-
-        logits = self.classification_head(output[:, 0])
-        return logits, attention_weights
+        output = self.positional_encoder(output)
+        output = self.dropout(output)
+        output, weights = self.transformer(output)
+        return self.head(output)

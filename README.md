@@ -27,11 +27,10 @@ With $Y\in\mathbb{R}^{d \times \frac{h}{k} \times \frac{w}{k}}$. Finally, if the
 This can be implemented as follows:
 
 ```python
-class ImageEmbeddings(Module):
-    def __init__(self, image_width: int, image_height: int, input_channels: int, patch_size: int, model_dimension: int):
+class ConvolutionalImagePatchEmbedding(Module):
+    def __init__(self, model_dimension: int, patch_shape: Tuple[int, int], number_of_channels: int):
         super().__init__()
-        self.number_of_patches = (image_width *  image_height // patch_size) ** 2        
-        self.projector = Conv2d(input_channels, model_dimension, kernel_size=patch_size, stride=patch_size)
+        self.projector = Conv2d(number_of_channels, model_dimension, kernel_size=patch_shape, stride=patch_shape)
 
     def forward(self, input: Tensor) -> Tensor:
         output = self.projector(input)
@@ -41,3 +40,9 @@ class ImageEmbeddings(Module):
 ### Positional Encoding and CLS Tokens
 
 The transformer model does not have a notion of position, so it is necessary to add positional information to the input embeddings. This can be done by adding a positional encoding to the input embeddings. The positional encoding is a tensor of the same size as the input embeddings, which is added to them. 
+
+
+
+### 
+
+![image](plots/ViT-a37df6a8-85d4-454c-aa7f-7d7c1cacfe25.png)
