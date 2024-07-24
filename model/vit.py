@@ -1,4 +1,3 @@
-from torch import nn
 from typing import Tuple, Optional
 from typing import List
 from einops.layers.torch import Rearrange
@@ -19,10 +18,10 @@ class LinearImagePatchEmbedding(Module):
         patch_height, patch_width = patch_shape
         patch_dimension = number_of_channels * patch_height * patch_width
         self.patch_embeddings = Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width),
-            nn.LayerNorm(patch_dimension),
-            nn.Linear(patch_dimension, model_dimension),
-            nn.LayerNorm(model_dimension),
+            Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph = patch_height, pw = patch_width),
+            LayerNorm(patch_dimension),
+            Linear(patch_dimension, model_dimension),
+            LayerNorm(model_dimension),
         )
 
     def forward(self, image: Tensor) -> Tensor:
@@ -43,10 +42,10 @@ class ConvolutionalImagePatchEmbedding(Module):
 class Encoder(Module):
     def __init__(self, model_dimension: int, hidden_dimension: int, number_of_heads: int, dropout: float = 0.):
         super().__init__()
-        self.normalization = nn.LayerNorm(model_dimension)
+        self.normalization = LayerNorm(model_dimension)
         self.attention = MultiheadAttention(model_dimension, number_of_heads, dropout = dropout, batch_first=True)
         self.feed_forward = Sequential(
-            nn.LayerNorm(model_dimension),
+            LayerNorm(model_dimension),
             Linear(model_dimension, hidden_dimension),
             GELU(),
             Dropout(dropout),
@@ -63,7 +62,7 @@ class Encoder(Module):
     
 
 
-class Transformer(nn.Module):
+class Transformer(Module):
     def __init__(self, model_dimension: int, hidden_dimension: int, number_of_layers: int, number_of_heads: int, dropout = 0.):
         super().__init__()
         self.norm = LayerNorm(model_dimension)
@@ -120,7 +119,7 @@ class ClassificationHead(Module):
         return self.head(input[:, 0])
 
 
-class ViT(nn.Module):
+class ViT(Module):
     def __init__(
         self, 
         patch_shape: Tuple[int, int], 
@@ -134,17 +133,17 @@ class ViT(nn.Module):
         dropout = 0., 
     ):
         super().__init__()
-        self.patcher = ConvolutionalImagePatchEmbedding(model_dimension, patch_shape, number_of_channels)
-        self.cls_token = CLSToken(model_dimension)
-        self.positional_encoder = LearnablePositionalEncoding(model_dimension, number_of_patches(max_image_shape, patch_shape))
-        self.dropout = Dropout(dropout)
+        self.image_to_embeddings = Sequential(
+            ConvolutionalImagePatchEmbedding(model_dimension, patch_shape, number_of_channels),
+            CLSToken(model_dimension),
+            LearnablePositionalEncoding(model_dimension, number_of_patches(max_image_shape, patch_shape)),
+            Dropout(dropout),
+        )
+
         self.transformer = Transformer(model_dimension, hidden_dimension, number_of_layers, number_of_heads, dropout)
         self.head = ClassificationHead(model_dimension, number_of_classes)
 
     def forward(self, image: Tensor) -> Tensor:
-        output = self.patcher(image)
-        output = self.cls_token(output)
-        output = self.positional_encoder(output)
-        output = self.dropout(output)
+        output = self.image_to_embeddings(image)
         output, weights = self.transformer(output)
         return self.head(output)

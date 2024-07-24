@@ -41,8 +41,6 @@ class ConvolutionalImagePatchEmbedding(Module):
 
 The transformer model does not have a notion of position, so it is necessary to add positional information to the input embeddings. This can be done by adding a positional encoding to the input embeddings. The positional encoding is a tensor of the same size as the input embeddings, which is added to them. 
 
-
-
 ### 
 
-![image](plots/ViT-a37df6a8-85d4-454c-aa7f-7d7c1cacfe25.png)
+![image](plots/ViT-388fbe73-4533-43a5-b446-38375beed88e.png)
