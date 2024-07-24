@@ -27,15 +27,13 @@ class LinearImagePatchEmbedding(Module):
         super().__init__()
         patch_height, patch_width = patch_shape
         patch_dimension = number_of_channels * patch_height * patch_width
-        self.patch_embeddings = Sequential(
+        self.projector = Sequential(
             Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph = patch_height, pw = patch_width),
-            LayerNorm(patch_dimension),
             Linear(patch_dimension, model_dimension),
-            LayerNorm(model_dimension),
         )
 
     def forward(self, image: Tensor) -> Tensor:
-        output = self.patch_embeddings(image)
+        output = self.projector(image)
         return output
 
 
@@ -88,7 +86,6 @@ class CLSToken(Module):
         batch_size = input.shape[0]
         token = self.token.expand(batch_size, -1, -1)
         return cat([token, input], dim=1)
-
 
 
 def number_of_patches(image_shape: Tuple[int, int], patch_shape: Tuple[int, int]) -> int:
